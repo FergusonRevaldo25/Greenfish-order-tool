@@ -3,3 +3,8 @@ node_modules/
 out/
 .env*
 !.env.example
+
+node_modules
+.next
+scen-output.xlsx
+*.tsbuildinfo
