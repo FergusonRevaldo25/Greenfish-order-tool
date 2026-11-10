@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { Template, Batch, AreaMode, readExport, groupOrders, readTemplate, place, paginate, fillTemplate, mergeBatch, norm } from "@/lib/greenfish";
+import { Template, Batch, AreaMode, readExport, groupOrders, readTemplate, place, paginate, fillTemplate, mergeBatch, assignSpare, compactTable, norm } from "@/lib/greenfish";
 
 const SAVED = "greenfish-extra-mapping";
 const DAY = "greenfish-day-v1";
@@ -14,10 +14,10 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const [saved, setSaved] = useState<Record<string, string>>({});
   const [areaMode, setAreaMode] = useState<AreaMode>("zip");
-  const [includeIgnored, setIncludeIgnored] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [over, setOver] = useState(false);
+  const [view, setView] = useState<"table" | "cards">("table");
   const [copied, setCopied] = useState("");
 
   useEffect(() => {
@@ -35,8 +35,10 @@ export default function Home() {
 
   const orders = useMemo(() => batches.flatMap(b => b.orders), [batches]);
   const batchOf = useMemo(() => { const m = new Map<string, Batch>(); batches.forEach(b => b.orders.forEach(o => m.set(o.order, b))); return m; }, [batches]);
-  const placed = useMemo(() => (tpl ? place(orders, tpl, saved, areaMode, includeIgnored) : []), [orders, tpl, saved, areaMode, includeIgnored]);
+  const placed = useMemo(() => (tpl ? place(orders, tpl, saved, areaMode) : []), [orders, tpl, saved, areaMode]);
   const pages = useMemo(() => paginate(placed), [placed]);
+  const tables = useMemo(() => (tpl ? pages.map(pg => compactTable(tpl, pg)) : []), [tpl, pages]);
+  const spares = useMemo(() => pages.map(assignSpare), [pages]);
   const unlisted = useMemo(() => [...new Set(placed.flatMap(p => p.unlisted.map(l => l.title)))], [placed]);
   const options = useMemo(() => tpl ? ["IGNORE", ...Array.from(new Set(Object.values(tpl.headers))).filter(h => !["DELIVERED", "ORDER#", "AREA"].includes(h.toUpperCase()))] : [], [tpl]);
   const collections = placed.filter(p => p.order.collection).length;
@@ -110,10 +112,6 @@ export default function Home() {
                 <option value="street">Street address</option>
               </select>
             </label>
-            <label className="check">
-              <input type="checkbox" checked={includeIgnored} onChange={e => setIncludeIgnored(e.target.checked)} />
-              Also note products marked IGNORE on the sheet as OTHER
-            </label>
           </div>
         </section>
 
@@ -140,10 +138,22 @@ export default function Home() {
               ))}
             </ol>
 
+            {spares.some(x => Object.keys(x.map).length > 0) && (
+              <section className="spare">
+                <h3>Added in spare columns</h3>
+                {spares.map((x, i) => Object.keys(x.map).length > 0 && (
+                  <p key={i}>{pages.length > 1 && <b>Sheet {i + 1}: </b>}
+                    {Object.entries(x.map).map(([label, col]) => <span className="chip" key={label}>{col} · {label}</span>)}
+                    {x.overflow.length > 0 && <span className="chip other">{x.overflow.length} more written as text in column AS</span>}
+                  </p>
+                ))}
+              </section>
+            )}
+
             {unlisted.length > 0 && (
               <section className="notice">
                 <h3>{unlisted.length} product{unlisted.length > 1 ? "s are" : " is"} not on your list</h3>
-                <span>They still go on the sheet as &quot;OTHER&quot; text on that order&apos;s row. Choose a column to put them in the right place.</span>
+                <span>They are added automatically in a spare column (H to N). If one belongs in an existing column instead, choose it here.</span>
                 {unlisted.map(t => (
                   <div className="row" key={t}>
                     <span>{t}</span>
@@ -156,7 +166,39 @@ export default function Home() {
               </section>
             )}
 
-            <div className="orders">
+            <div className="seg" role="tablist" aria-label="View">
+              <button role="tab" aria-selected={view === "table"} className={view === "table" ? "on" : ""} onClick={() => setView("table")}>Sheet view</button>
+              <button role="tab" aria-selected={view === "cards"} className={view === "cards" ? "on" : ""} onClick={() => setView("cards")}>Order cards</button>
+            </div>
+
+            {view === "table" && tables.map((tb, i) => (
+              <section key={i} className="tablewrap">
+                {pages.length > 1 && <h3>Sheet {i + 1}</h3>}
+                <div className="scroll">
+                  <table className="sheet">
+                    <thead><tr>
+                      <th>Order</th><th>Area</th>
+                      {tb.letters.map(l => <th key={l}>{tb.names.get(l)}</th>)}
+                      {tb.hasOver && <th>Other</th>}
+                      <th>Map</th>
+                    </tr></thead>
+                    <tbody>
+                      {tb.rows.map(r => (
+                        <tr key={r.placed.order.order} className={r.placed.order.collection ? "collect" : ""}>
+                          <td><b>{r.placed.order.order}</b></td>
+                          <td>{r.placed.order.area}</td>
+                          {tb.letters.map(l => <td key={l} className="q">{r.values[l] ?? ""}</td>)}
+                          {tb.hasOver && <td>{r.over.join("; ")}</td>}
+                          <td>{r.placed.order.mapsUrl && <a href={r.placed.order.mapsUrl} target="_blank" rel="noreferrer">Open</a>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ))}
+
+            {view === "cards" && <div className="orders">
               {placed.map(({ order: o, lines }) => (
                 <article key={o.order} className={`card${o.collection ? " collect" : ""}`}>
                   <div className="card-top">
@@ -177,15 +219,15 @@ export default function Home() {
                     )}
                   </div>
                   <div className="chips">
-                    {lines.map((l, i) => l.how === "none"
-                      ? <span className="chip other" key={i}>{l.title.split(" | ")[0]} <b>× {l.qty}</b> not on list</span>
-                      : l.ignored
-                        ? <span className="chip skip" key={i}>{l.title.split(" | ")[0]} <b>× {l.qty}</b> {includeIgnored ? "as OTHER" : "not on sheet"}</span>
+                    {lines.map((l, i) => l.ignored
+                      ? <span className="chip skip" key={i}>{l.title.split(" | ")[0]} <b>× {l.qty}</b> not on sheet</span>
+                      : l.spare
+                        ? <span className="chip other" key={i}>{l.spare} <b>{l.entree ? `${l.qty}e` : `× ${l.qty}`}</b> spare column</span>
                         : <span className="chip" key={i}>{l.header} <b>{l.entree ? `${l.qty}e` : `× ${l.qty}`}</b></span>)}
                   </div>
                 </article>
               ))}
-            </div>
+            </div>}
           </>
         )}
 

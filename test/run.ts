@@ -12,8 +12,11 @@ const rows = [
   { ...base, Name: "#1002", "Shipping Method": "Collection - Claremont", "Lineitem name": "Prawn Lover | Frozen Box | Wild caught | 5kg", "Lineitem quantity": "1" },
   { ...base, ...addr, "Shipping Address2": "Hout Bay", Name: "#1003", "Lineitem name": "Totally New Product | 1kg", "Lineitem quantity": "3" },
 ];
+rows.push({ ...base, Name: "#GF60999", "Shipping Method": "Delivery and Packaging", "Shipping Address1": "The Dairy Shed, Contermanskloof farm", "Shipping City": "Durbanville", "Shipping Zip": "'7551", "Lineitem name": "Yellowtail Fillets | Fresh Fish Box | Wild caught", "Lineitem quantity": "1" } as any);
+rows.push({ ...base, ...addr, Name: "#1005", "Lineitem name": "Greenfish Hoodie - Small", "Lineitem quantity": "1" } as any);
+rows.push({ ...base, ...addr, Name: "#1005", "Lineitem name": "Yellowtail Fillets | Fresh Fish Box | Wild caught", "Lineitem quantity": "2" } as any);
 const placed = place(groupOrders(rows as any), t, { "prawn lover | frozen box | wild caught | 5kg": "HAKE" });
-for (const p of placed) console.log(p.order.order, p.order.area, JSON.stringify(p.cells), p.lines.map(l => l.how).join(","), p.other.length);
+for (const p of placed) console.log(p.order.order, p.order.area, JSON.stringify(p.cells), p.lines.map(l => l.how).join(","), JSON.stringify(p.spare.map(l => l.spare)));
 (async () => {
   const out = await fillTemplate(t, paginate(placed)[0], { date: "15/10/2026", pageNo: 1, pageCount: 1 });
   fs.writeFileSync("/tmp/out.xlsx", out);
@@ -22,7 +25,7 @@ for (const p of placed) console.log(p.order.order, p.order.area, JSON.stringify(
     const x = Buffer.from(await a.file(n)!.async("uint8array")), y = Buffer.from(await b.file(n)!.async("uint8array"));
     if (Buffer.compare(x, y)) console.log("changed part:", n);
   }
-  const strip = (s: string) => s.replace(/<c r="(?:C1|G1|[A-Z]+(?:[4-9]|1\d|2\d|3[0-2]))"[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g, m => m.replace(/<c r="([A-Z]+\d+)"[^>]*?s="(\d+)"[\s\S]*/, '<c r="$1" s="$2"/>'));
+  const strip = (s: string) => s.replace(/<c r="(?:C1|G1|[H-N]3|[A-Z]+(?:[4-9]|1\d|2\d|3[0-2]))"[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g, m => m.replace(/<c r="([A-Z]+\d+)"[^>]*?s="(\d+)"[\s\S]*/, '<c r="$1" s="$2"/>'));
   console.log("rest of sheet identical:", strip(await a.file("xl/worksheets/sheet1.xml")!.async("string")) === strip(await b.file("xl/worksheets/sheet1.xml")!.async("string")));
 })();
 
