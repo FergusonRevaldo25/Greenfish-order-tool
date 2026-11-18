@@ -233,11 +233,12 @@ function dynamicBucket(title: string): string | undefined {
   const fresh = /\bFRESH\b/.test(text);
   const frozen = /\bFROZEN\b/.test(text);
   const fish = isFishProduct(title);
-  // These products follow their Fresh/Frozen fish location even when their title also says Sushi or Premium.
-  if (fish && /\bSALMON\b/.test(text) && (fresh || frozen)) return fresh ? "FRESH" : "FROZEN";
+  // A Fresh tuna sushi block is a fresh-fish item, not a JAP-section product.
   if (fish && fresh && /\bSUSHI\s*BLOCK\b/.test(text)) return "FRESH";
   const special = categoryFor(title);
   if (special) return special;
+  // Plain Nor Salmon fillets follow the ordered Fresh/Frozen state.
+  if (fish && /\bSALMON\b/.test(text) && (fresh || frozen)) return fresh ? "FRESH" : "FROZEN";
   if (fish && fresh) return "FRESH";
   if (fish && frozen) return "FROZEN";
   return undefined;
@@ -326,6 +327,22 @@ export async function fillTemplate(t: Template, page: Placed[], opts: { date: st
   const target = new RegExp(`<Relationship [^>]*Id="${rid}"[^>]*>`).exec(rels)![0];
   const path = "xl/" + /Target="([^"]+)"/.exec(target)![1].replace(/^\/?(xl\/)?/, "");
   let xml = await zip.file(path)!.async("string");
+  const widenColumn = (sheet: string, column: string, width: number) => {
+    const number = colNum(column);
+    return sheet.replace(/<col\b[^>]*\/>/g, tag => {
+      const min = Number(/\smin="(\d+)"/.exec(tag)?.[1] || 0);
+      const max = Number(/\smax="(\d+)"/.exec(tag)?.[1] || 0);
+      const oldWidth = Number(/\swidth="([\d.]+)"/.exec(tag)?.[1] || 0);
+      if (number < min || number > max || oldWidth >= width) return tag;
+      const attrs = tag.slice(4, -2);
+      const make = (lo: number, hi: number, w: number) => `<col${attrs.replace(/\smin="\d+"/, ` min="${lo}"`).replace(/\smax="\d+"/, ` max="${hi}"`).replace(/\swidth="[\d.]+"/, ` width="${w}"`)} />`;
+      const pieces: string[] = [];
+      if (min < number) pieces.push(make(min, number - 1, oldWidth));
+      pieces.push(make(number, number, width));
+      if (number < max) pieces.push(make(number + 1, max, oldWidth));
+      return pieces.join("");
+    });
+  };
   const spare = assignSpare(page);
   xml = setCell(xml, "C1", opts.date);
   xml = setCell(xml, "G1", `PAGE:  ${opts.pageNo}  OF  ${opts.pageCount}`);
@@ -372,7 +389,10 @@ export async function fillTemplate(t: Template, page: Placed[], opts: { date: st
         }
       }
     }
-    for (const [col, lines] of values) xml = setCell(xml, `${col}${r}`, formatQuantities(lines));
+    for (const [col, lines] of values) {
+      xml = widenColumn(xml, col, 4);
+      xml = setCell(xml, `${col}${r}`, formatQuantities(lines));
+    }
 
     const overflow: string[] = [];
     for (const label of Object.keys(spare.map)) {
@@ -416,6 +436,8 @@ export const paginate = <T,>(a: T[]) => {
   for (let i = 0; i < a.length; i += ROWS_PER_PAGE) pages.push(a.slice(i, i + ROWS_PER_PAGE));
   return pages.length ? pages : [[]];
 };
+
+
 
 
 
