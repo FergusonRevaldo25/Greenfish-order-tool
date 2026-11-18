@@ -247,9 +247,12 @@ function dynamicBucket(title: string): string | undefined {
 function categoryHeading(title: string, bucket: string): string {
   const base = title.split("|")[0].replace(/\s+/g, " ").trim();
   const text = title.toUpperCase();
-  const state = /\bFRESH\b/.test(text) ? " · FRESH" : /\bFROZEN\b/.test(text) ? " · FROZEN" : "";
+  const state = bucket === "FRESH" ? "FR" : bucket === "FROZEN" ? "FZ"
+    : /\bFRESH\b/.test(text) ? "FR" : /\bFROZEN\b/.test(text) ? "FZ" : "";
+  const category = ["PREM", "SKIN", "MEAT", "JAP"].includes(bucket) ? bucket : "";
+  const tags = [state, category].filter(Boolean).join("/");
+  const suffix = tags ? ` · ${tags}` : "";
   const max = 28;
-  const suffix = state;
   const room = Math.max(8, max - suffix.length);
   const shortBase = base.length > room ? `${base.slice(0, room - 1).trimEnd()}…` : base;
   return `${shortBase}${suffix}`;
@@ -441,6 +444,7 @@ export const paginate = <T,>(a: T[]) => {
   for (let i = 0; i < a.length; i += ROWS_PER_PAGE) pages.push(a.slice(i, i + ROWS_PER_PAGE));
   return pages.length ? pages : [[]];
 };
+
 
 
 
