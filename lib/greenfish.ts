@@ -1,4 +1,4 @@
-import JSZip from "jszip";
+﻿import JSZip from "jszip";
 import * as XLSX from "xlsx";
 import Papa from "papaparse";
 
@@ -30,7 +30,7 @@ export type Template = {
   families: Map<string, string>;
 };
 /** One product line of an order, and where it landed. */
-export type Line = { title: string; qty: number; entree: boolean; header?: string; ignored?: boolean; /** product with no column of its own: goes in a spare column */ spare?: string; how: "template" | "family" | "saved" | "none" };
+export type Line = { title: string; qty: number; entree: boolean; size?: string; header?: string; ignored?: boolean; /** product with no column of its own: goes in a spare column */ spare?: string; how: "template" | "family" | "saved" | "none" };
 /** `spare` lines go in the empty product columns H to N; `unlisted` is products found on no list at all. */
 export type Placed = { order: Order; cells: Record<string, number | string>; lines: Line[]; spare: Line[]; unlisted: Line[] };
 /** One upload. Once added, a batch is never changed by later uploads. */
@@ -42,7 +42,7 @@ export const ROWS_PER_PAGE = LAST_ROW - FIRST_ROW + 1;
 /** The blank, rotated header columns in the template where products without a column of their own are added. */
 export const SPARE_COLUMNS = ["H", "I", "J", "K", "L", "M", "N"];
 /** If a page needs more spare columns than that, the rest is written as text here so no order is ever dropped. */
-export const OTHER_COLUMN = "AS";
+export const OTHER_COLUMN = "BH";
 /** Not seafood or food: gift cards, merchandise, fees and tools are never added to the sheet. */
 const NON_PRODUCT = /gift card|hoodie|greenfish cap|service fee|turtle programme|test product|courier|braai tong|oyster knife|chopsticks|sushi mat|sauce dish/i;
 
@@ -60,6 +60,19 @@ export const norm = (s: string) =>
   s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[\u2018\u2019\u00b4`]/g, "'")
     .toLowerCase().replace(/\s+/g, " ").replace(/\s*\|\s*/g, " | ").trim();
 const isEntree = (s: string) => /entr[eé]e/i.test(s.normalize("NFC"));
+const sizeFrom = (s: string): string | undefined => {
+  const text = s.toUpperCase();
+  const xlarge = /\b(X{2,5})\s*(?:X\s*)?LARGE\b/.exec(text);
+  if (xlarge) return `${"x".repeat(xlarge[1].length)}l`;
+  const compact = /\b(XXXXXL|XXXXL|XXXL|XXL|XL)\b/.exec(text);
+  if (compact) return compact[1].toLowerCase();
+  if (/\bEXTRA\s*LARGE\b/.test(text)) return "xl";
+  if (/\bSMALL\b/.test(text)) return "s";
+  if (/\bMEDIUM\b/.test(text)) return "m";
+  if (/\bLARGE\b/.test(text)) return "l";
+  const single = /\b([SML])\b/.exec(text);
+  return single?.[1].toLowerCase();
+};
 const familyOf = (s: string) => norm(s).split(" | ")[0].replace(/\bentree\b/g, "").replace(/\s+/g, " ").trim();
 
 /* ---------- reading the Shopify export ---------- */
@@ -179,20 +192,82 @@ export function show(q: number, e: number): number | string {
   return e ? `${e}e` : q;
 }
 
+function productDetails(title: string): string {
+  const text = title.split("|").slice(1).join(" ").toUpperCase();
+  const found = [
+    ["FRESH", /\bFRESH\b/],
+    ["FROZEN", /\bFROZEN\b/],
+    ["PREMIUM", /\bPREMIUM\b/],
+    ["SKIN PACK", /\bSKIN\s*PACK\b/],
+    ["FILLET", /\bFILLETS?\b/],
+    ["PORTION", /\bPORTIONS?\b/],
+    ["LIVE", /\bLIVE\b/],
+  ].filter(([, re]) => (re as RegExp).test(text)).map(([label]) => label as string);
+  return [...new Set(found)].join(" · ");
+}
+
+const CATEGORY_SLOTS: Record<string, string[]> = {
+  PREM: ["AS", "AT", "AU", "AV"],
+  SKIN: ["AW", "AX", "AY", "AZ"],
+  MEAT: ["BA", "BB", "BC", "BD"],
+  JAP: ["BE", "BF", "BG"],
+};
+
+function categoryFor(title: string): keyof typeof CATEGORY_SLOTS | undefined {
+  const text = title.toUpperCase();
+  if (/\bPREMIUM\b|\bPREM\b/.test(text)) return "PREM";
+  if (/\bSKIN\s*PACK\b/.test(text)) return "SKIN";
+  if (/\bCURED\s*MEAT\b|\bMEAT\b|\bSAUSAGE\b|\bSALAMI\b|\bBACON\b|\bHAM\b|\bPastrami\b/i.test(text)) return "MEAT";
+  if (/\bJAPANESE\b|\bSUSHI\b|\bSASHIMI\b|\bNORI\b|\bWASABI\b|\bMISO\b/.test(text)) return "JAP";
+  return undefined;
+}
+
+function routeBucket(line: Line, t: Template): string | undefined {
+  const category = categoryFor(line.title);
+  if (category) return category;
+  if (!line.header || line.header.toUpperCase() === "IGNORE") return undefined;
+  const col = columnFor(line.header, line.title, t);
+  if (!col) return undefined;
+  const n = colNum(col);
+  if (/\bFRESH\b/i.test(line.title) && n >= 20) return "FRESH";
+  if (/\bFROZEN\b/i.test(line.title) && n >= 4 && n <= 7) return "FROZEN";
+  return undefined;
+}
+
+function categoryHeading(title: string): string {
+  const base = title.split("|")[0].trim();
+  const details = productDetails(title);
+  return details ? `${base} · ${details}` : base;
+}
+
+function formatQuantities(lines: Pick<Line, "qty" | "entree" | "size">[]): number | string {
+  const totals: Record<string, number> = {};
+  for (const line of lines) {
+    const key = `${line.size || ""}${line.entree ? "e" : ""}`;
+    totals[key] = (totals[key] || 0) + line.qty;
+  }
+  const keys = Object.keys(totals).sort((a, b) => {
+    const order = ["", "s", "m", "l", "xl", "xxl", "xxxl", "xxxxl", "xxxxxl", "e"];
+    return order.indexOf(a.replace(/e$/, "")) - order.indexOf(b.replace(/e$/, ""));
+  });
+  if (keys.length === 1 && keys[0] === "") return totals[""];
+  return keys.map(k => `${totals[k]}${k}`).join(", ");
+}
+
 export function place(orders: Order[], t: Template, saved: Record<string, string> = {}, areaMode: AreaMode = "zip"): Placed[] {
   return orders.map(order => {
-    const sums: Record<string, { q: number; e: number }> = {};
+    const sums: Record<string, Line[]> = {};
     const lines: Line[] = [];
     for (const it of order.items) {
       let r = resolve(it.title, t, saved);
       // "IGNORE" only means the template has no column for it, so a choice made in the app may fill it in.
       const choice = saved[norm(it.title)];
       if (r.header?.toUpperCase() === "IGNORE" && choice && choice.toUpperCase() !== "IGNORE") r = { header: choice, how: "saved" };
-      const line: Line = { title: it.title, qty: it.qty, entree: isEntree(it.title), how: r.how, header: r.header };
+      const line: Line = { title: it.title, qty: it.qty, entree: isEntree(it.title), size: sizeFrom(it.title), how: r.how, header: r.header };
       const col = r.header && r.header.toUpperCase() !== "IGNORE" ? columnFor(r.header, it.title, t) : undefined;
       if (col) {
-        const s = (sums[col] ||= { q: 0, e: 0 });
-        if (line.entree) s.e += it.qty; else s.q += it.qty; // sizes of one product add up
+        const grouped = (sums[col] ||= []);
+        grouped.push(line);
       } else if (NON_PRODUCT.test(it.title)) {
         line.ignored = true; line.header = "IGNORE";
       } else {
@@ -202,7 +277,7 @@ export function place(orders: Order[], t: Template, saved: Record<string, string
       lines.push(line);
     }
     const cells: Record<string, number | string> = {};
-    for (const [c, s] of Object.entries(sums)) cells[c] = show(s.q, s.e);
+    for (const [c, lines] of Object.entries(sums)) cells[c] = formatQuantities(lines);
     return {
       order: { ...order, area: areaText(order, areaMode) }, cells, lines,
       spare: lines.filter(l => l.spare), unlisted: lines.filter(l => l.how === "none"),
@@ -214,7 +289,7 @@ export function place(orders: Order[], t: Template, saved: Record<string, string
 export function assignSpare(page: Placed[]) {
   const map: Record<string, string> = {};
   const overflow: string[] = [];
-  for (const p of page) for (const l of p.spare) {
+  for (const p of page) for (const l of p.spare) { if (categoryFor(l.title)) continue;
     const label = l.spare!;
     if (map[label] || overflow.includes(label)) continue;
     const free = SPARE_COLUMNS[Object.keys(map).length];
@@ -249,18 +324,69 @@ export async function fillTemplate(t: Template, page: Placed[], opts: { date: st
   const spare = assignSpare(page);
   xml = setCell(xml, "C1", opts.date);
   xml = setCell(xml, "G1", `PAGE:  ${opts.pageNo}  OF  ${opts.pageCount}`);
+
+  const categoryColumn = new Map<string, string>();
+  const categoryLabels = new Map<string, string>();
+  const usedCategorySlots: Record<string, number> = {};
+  const fallbackUsed = new Set<string>(Object.values(spare.map));
+  for (const col of Object.values(CATEGORY_SLOTS).flat()) xml = setCell(xml, `${col}3`, "");
+  for (const p of page) for (const line of p.lines) {
+    const category = routeBucket(line, t);
+    if (!category) continue;
+    const key = `${category}|${norm(categoryHeading(line.title))}`;
+    if (categoryColumn.has(key)) continue;
+    const index = usedCategorySlots[category] || 0;
+    let col = CATEGORY_SLOTS[category]?.[index];
+    if (!col) {
+      col = SPARE_COLUMNS.find(candidate => !fallbackUsed.has(candidate)) || "";
+      if (!col) throw new Error(`The ${category} section and spare headings are full. Add another product column to the template before downloading.`);
+      fallbackUsed.add(col);
+      categoryLabels.set(col, `${category} · ${categoryHeading(line.title)}`);
+    } else {
+      usedCategorySlots[category] = index + 1;
+      categoryLabels.set(col, categoryHeading(line.title));
+    }
+    categoryColumn.set(key, col);
+  }
+  for (const [col, label] of categoryLabels) xml = setCell(xml, `${col}3`, label);
+
   page.forEach((p, i) => {
     const r = FIRST_ROW + i;
     const n = p.order.order.replace(/^#/, "");
     xml = setCell(xml, `B${r}`, /^\d+$/.test(n) ? Number(n) : n);
     if (p.order.area) xml = setCell(xml, `C${r}`, p.order.area);
-    for (const [col, v] of Object.entries(p.cells)) xml = setCell(xml, `${col}${r}`, v);
+
+    const regularByColumn = new Map<string, Line[]>();
+    const categoryByColumn = new Map<string, Line[]>();
+    for (const line of p.lines) {
+      const category = routeBucket(line, t);
+      if (category) {
+        const key = `${category}|${norm(categoryHeading(line.title))}`;
+        const col = categoryColumn.get(key)!;
+        const list = categoryByColumn.get(col) || [];
+        list.push(line); categoryByColumn.set(col, list);
+      } else if (!line.spare && !line.ignored && line.header && line.header.toUpperCase() !== "IGNORE") {
+        const col = columnFor(line.header, line.title, t);
+        if (col) {
+          const list = regularByColumn.get(col) || [];
+          list.push(line); regularByColumn.set(col, list);
+        }
+      }
+    }
+    for (const [col, lines] of regularByColumn) xml = setCell(xml, `${col}${r}`, formatQuantities(lines));
+    for (const [col, lines] of categoryByColumn) xml = setCell(xml, `${col}${r}`, formatQuantities(lines));
+
     const per: Record<string, { q: number; e: number }> = {};
-    for (const l of p.spare) { const x = (per[l.spare!] ||= { q: 0, e: 0 }); if (l.entree) x.e += l.qty; else x.q += l.qty; }
+    for (const l of p.spare) {
+      if (categoryFor(l.title)) continue;
+      const x = (per[l.spare!] ||= { q: 0, e: 0 });
+      if (l.entree) x.e += l.qty; else x.q += l.qty;
+    }
     const over: string[] = [];
-    for (const [label, x] of Object.entries(per)) {
-      if (spare.map[label]) xml = setCell(xml, `${spare.map[label]}${r}`, show(x.q, x.e));
-      else over.push(`${label} ${x.e && !x.q ? x.e + "e" : "x" + (x.q + x.e)}`);
+    for (const label of Object.keys(per)) {
+      const lines = p.spare.filter(l => l.spare === label && !categoryFor(l.title));
+      if (spare.map[label]) xml = setCell(xml, `${spare.map[label]}${r}`, formatQuantities(lines));
+      else over.push(`${label} ${formatQuantities(lines)}`);
     }
     if (over.length) xml = setCell(xml, `${OTHER_COLUMN}${r}`, "OTHER: " + over.join("; "));
   });
@@ -284,7 +410,7 @@ export function compactTable(t: Template, page: Placed[]) {
     const values: Record<string, number | string> = { ...p.cells };
     const over: string[] = [];
     for (const [label, x] of Object.entries(per)) {
-      if (spare.map[label]) values[spare.map[label]] = show(x.q, x.e); else over.push(`${label} ${show(x.q, x.e)}`);
+      if (spare.map[label]) values[spare.map[label]] = formatQuantities(p.spare.filter(l => l.spare === label)); else over.push(`${label} ${formatQuantities(p.spare.filter(l => l.spare === label))}`);
     }
     return { placed: p, values, over };
   });
@@ -296,3 +422,6 @@ export const paginate = <T,>(a: T[]) => {
   for (let i = 0; i < a.length; i += ROWS_PER_PAGE) pages.push(a.slice(i, i + ROWS_PER_PAGE));
   return pages.length ? pages : [[]];
 };
+
+
+
