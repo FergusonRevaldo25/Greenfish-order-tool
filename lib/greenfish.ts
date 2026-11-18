@@ -244,10 +244,15 @@ function dynamicBucket(title: string): string | undefined {
   return undefined;
 }
 
-function categoryHeading(title: string): string {
-  const base = title.split("|")[0].trim();
-  const details = productDetails(title);
-  return details ? `${base} · ${details}` : base;
+function categoryHeading(title: string, bucket: string): string {
+  const base = title.split("|")[0].replace(/\s+/g, " ").trim();
+  const text = title.toUpperCase();
+  const state = /\bFRESH\b/.test(text) ? " · FRESH" : /\bFROZEN\b/.test(text) ? " · FROZEN" : "";
+  const max = 28;
+  const suffix = state;
+  const room = Math.max(8, max - suffix.length);
+  const shortBase = base.length > room ? `${base.slice(0, room - 1).trimEnd()}…` : base;
+  return `${shortBase}${suffix}`;
 }
 function formatQuantities(lines: Pick<Line, "qty" | "entree" | "size">[]): number | string {
   const totals: Record<string, number> = {};
@@ -356,7 +361,7 @@ export async function fillTemplate(t: Template, page: Placed[], opts: { date: st
   for (const p of page) for (const line of p.lines) {
     const bucket = dynamicBucket(line.title);
     if (!bucket) continue;
-    const label = categoryHeading(line.title);
+    const label = categoryHeading(line.title, bucket);
     const key = `${bucket}|${norm(label)}`;
     if (assigned.has(key)) continue;
     const index = nextIndex[bucket] || 0;
@@ -378,7 +383,7 @@ export async function fillTemplate(t: Template, page: Placed[], opts: { date: st
     for (const line of p.lines) {
       const bucket = dynamicBucket(line.title);
       if (bucket) {
-        const col = assigned.get(`${bucket}|${norm(categoryHeading(line.title))}`)!;
+        const col = assigned.get(`${bucket}|${norm(categoryHeading(line.title, bucket))}`)!;
         const list = values.get(col) || [];
         list.push(line); values.set(col, list);
       } else if (!line.spare && !line.ignored && line.header && line.header.toUpperCase() !== "IGNORE") {
@@ -436,6 +441,7 @@ export const paginate = <T,>(a: T[]) => {
   for (let i = 0; i < a.length; i += ROWS_PER_PAGE) pages.push(a.slice(i, i + ROWS_PER_PAGE));
   return pages.length ? pages : [[]];
 };
+
 
 
 
