@@ -370,7 +370,7 @@ export async function fillTemplate(t: Template, page: Placed[], opts: { date: st
     const key = `${bucket}|${norm(label)}`;
     if (assigned.has(key)) continue;
     const index = nextIndex[bucket] || 0;
-    let col = DYNAMIC_SLOTS[bucket][index];
+    let col: string | undefined = DYNAMIC_SLOTS[bucket][index];
     let borrowed = false;
     if (!col && ["PREM", "SKIN", "MEAT", "JAP"].includes(bucket)) {
       col = specialSlots.find(candidate => !usedSpecialSlots.has(candidate));
@@ -452,6 +452,7 @@ export const paginate = <T,>(a: T[]) => {
   for (let i = 0; i < a.length; i += ROWS_PER_PAGE) pages.push(a.slice(i, i + ROWS_PER_PAGE));
   return pages.length ? pages : [[]];
 };
+
 
 
 
