@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { useEffect, useMemo, useState } from "react";
 import { Template, Batch, AreaMode, readExport, groupOrders, readTemplate, place, paginate, fillTemplate, mergeBatch, assignSpare, compactTable, norm } from "@/lib/greenfish";
 
@@ -223,7 +223,7 @@ export default function Home() {
                       ? <span className="chip skip" key={i}>{l.title.split(" | ")[0]} <b>× {l.qty}</b> not on sheet</span>
                       : l.spare
                         ? <span className="chip other" key={i}>{l.spare} <b>{l.entree ? `${l.qty}e` : `× ${l.qty}`}</b> spare column</span>
-                        : <span className="chip" key={i}>{l.header} <b>{l.entree ? `${l.qty}e` : `× ${l.qty}`}</b></span>)}
+                        : <span className="chip" key={i}>{l.header}{l.size ? ` · ${l.size}` : ""} <b>{l.entree ? `${l.qty}e` : `× ${l.qty}`}</b></span>)}
                   </div>
                 </article>
               ))}
@@ -255,3 +255,4 @@ export default function Home() {
     </>
   );
 }
+
