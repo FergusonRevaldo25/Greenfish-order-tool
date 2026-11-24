@@ -361,6 +361,8 @@ export async function fillTemplate(t: Template, page: Placed[], opts: { date: st
   const assigned = new Map<string, string>();
   const headings = new Map<string, string>();
   const nextIndex: Record<string, number> = {};
+  const specialSlots = ["AS", "AT", "AU", "AV", "AW", "AX", "AY", "AZ", "BA", "BB", "BC", "BD", "BE", "BF", "BG"];
+  const usedSpecialSlots = new Set<string>();
   for (const p of page) for (const line of p.lines) {
     const bucket = dynamicBucket(line.title);
     if (!bucket) continue;
@@ -368,11 +370,17 @@ export async function fillTemplate(t: Template, page: Placed[], opts: { date: st
     const key = `${bucket}|${norm(label)}`;
     if (assigned.has(key)) continue;
     const index = nextIndex[bucket] || 0;
-    const col = DYNAMIC_SLOTS[bucket][index];
-    if (!col) throw new Error(`The ${bucket} section is full for this page. Add another template column in that section before downloading.`);
+    let col = DYNAMIC_SLOTS[bucket][index];
+    let borrowed = false;
+    if (!col && ["PREM", "SKIN", "MEAT", "JAP"].includes(bucket)) {
+      col = specialSlots.find(candidate => !usedSpecialSlots.has(candidate));
+      borrowed = !!col;
+    }
+    if (!col) throw new Error(`All special-category slots are full for this page. Add another product column to the template before downloading.`);
     nextIndex[bucket] = index + 1;
+    if (specialSlots.includes(col)) usedSpecialSlots.add(col);
     assigned.set(key, col);
-    headings.set(col, label);
+    headings.set(col, borrowed ? `${bucket} · ${label}` : label);
   }
   for (const [col, label] of headings) xml = setCell(xml, `${col}3`, label);
 
@@ -444,6 +452,8 @@ export const paginate = <T,>(a: T[]) => {
   for (let i = 0; i < a.length; i += ROWS_PER_PAGE) pages.push(a.slice(i, i + ROWS_PER_PAGE));
   return pages.length ? pages : [[]];
 };
+
+
 
 
 
