@@ -217,13 +217,15 @@ const DYNAMIC_SLOTS: Record<string, string[]> = {
 
 function categoryFor(title: string): keyof typeof DYNAMIC_SLOTS | undefined {
   const text = title.toUpperCase();
-  if (/\bPREMIUM\b|\bPREM\b/.test(text)) return "PREM";
+  // Route premium pack ranges, not products whose marketing name merely contains "Premium".
+  if (/\bPREMIUM\s+(?:PORTION|FILLET)\s+RANGE\b|\bPREMIUM\s+PACK\b/.test(text)) return "PREM";
   if (/\bSKIN\s*PACK\b/.test(text)) return "SKIN";
-  if (/\bCURED\s*MEAT\b|\bMEAT\b|\bSAUSAGE\b|\bSALAMI\b|\bBACON\b|\bHAM\b|\bPASTRAMI\b/.test(text)) return "MEAT";
+  // Do not treat seafood sold as "tail meat" as a cured-meat product.
+  if (/\b(PRAWN|CRAB|LOBSTER|MUSSEL|OYSTER|SCALLOP|SQUID|OCTOPUS)\b.*\bMEAT\b/.test(text)) return undefined;
+  if (/\bCURED\s*MEAT\b|\bSAUSAGE\b|\bSALAMI\b|\bBACON\b|\bHAM\b|\bPASTRAMI\b|\bVENISON\s+(?:MINCE|BURGER|BOEREWORS)\b/.test(text)) return "MEAT";
   if (/\bJAPANESE\b|\bSUSHI\b|\bSASHIMI\b|\bNORI\b|\bWASABI\b|\bMISO\b/.test(text)) return "JAP";
   return undefined;
 }
-
 function isFishProduct(title: string): boolean {
   return /\b(FISH|FILLET|STEAK|SALMON|TUNA|HAKE|KINGKLIP|YELLOWTAIL|SNOEK|SOLE|TROUT|SARDINE|MARLIN|MOONFISH|DORADO|STUMPNOSE|KABELJOU|BASS|GURNARD|SAILFISH|BUTTERFISH|MONKFISH)\b/i.test(title);
 }
@@ -252,7 +254,7 @@ function categoryHeading(title: string, bucket: string): string {
   const category = ["PREM", "SKIN", "MEAT", "JAP"].includes(bucket) ? bucket : "";
   const tags = [state, category].filter(Boolean).join("/");
   const suffix = tags ? ` · ${tags}` : "";
-  const max = 28;
+  const max = 26;
   const room = Math.max(8, max - suffix.length);
   const shortBase = base.length > room ? `${base.slice(0, room - 1).trimEnd()}…` : base;
   return `${shortBase}${suffix}`;
@@ -452,6 +454,7 @@ export const paginate = <T,>(a: T[]) => {
   for (let i = 0; i < a.length; i += ROWS_PER_PAGE) pages.push(a.slice(i, i + ROWS_PER_PAGE));
   return pages.length ? pages : [[]];
 };
+
 
 
 
