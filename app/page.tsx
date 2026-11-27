@@ -1,4 +1,5 @@
 ﻿"use client";
+import JSZip from "jszip";
 import { useEffect, useMemo, useState } from "react";
 import { Template, Batch, AreaMode, readExport, groupOrders, readTemplate, place, paginate, fillTemplate, mergeBatch, assignSpare, compactTable, norm } from "@/lib/greenfish";
 
@@ -68,17 +69,41 @@ export default function Home() {
     try { await navigator.clipboard.writeText(url); setCopied(id); setTimeout(() => setCopied(""), 1600); } catch {}
   }
   async function download() {
-    if (!tpl) return;
-    const [y, m, d] = date.split("-");
-    for (let i = 0; i < pages.length; i++) {
-      const bytes = await fillTemplate(tpl, pages[i], { date: `${d}/${m}/${y}`, pageNo: i + 1, pageCount: pages.length });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
-      a.download = `Greenfish daily sales ${date}${pages.length > 1 ? ` (page ${i + 1})` : ""}.xlsx`;
-      a.click();
+    if (!tpl || !placed.length) return;
+    setError("");
+    try {
+      const [y, m, d] = date.split("-");
+      const files: Uint8Array[] = [];
+      for (let i = 0; i < pages.length; i++) {
+        files.push(await fillTemplate(tpl, pages[i], { date: `${d}/${m}/${y}`, pageNo: i + 1, pageCount: pages.length }));
+      }
+
+      const downloadBlob = (blob: Blob, name: string) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      };
+
+      if (files.length === 1) {
+        downloadBlob(
+          new Blob([files[0] as BlobPart], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+          `Greenfish daily sales ${date}.xlsx`
+        );
+      } else {
+        const archive = new JSZip();
+        files.forEach((bytes, i) => archive.file(`Greenfish daily sales ${date} (page ${i + 1} of ${files.length}).xlsx`, bytes));
+        downloadBlob(await archive.generateAsync({ type: "blob" }), `Greenfish daily sales ${date} (${files.length} pages).zip`);
+      }
+    } catch (err) {
+      console.error("Greenfish sheet download failed:", err);
+      setError(`The sheet could not be prepared: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-
   return (
     <>
       <header className="hero">
@@ -255,4 +280,5 @@ export default function Home() {
     </>
   );
 }
+
 
